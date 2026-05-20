@@ -1,0 +1,82 @@
+{
+  "source_file_count": 1,
+  "file_count": 1,
+  "utterance_count": 38,
+  "verb_count": 50,
+  "analyzable_verb_count": 34,
+  "target_like_verb_count": 34,
+  "non_target_verb_count": 0,
+  "overall_agreement_accuracy": 1.0,
+  "attraction_configuration_count": 0,
+  "attraction_error_count": 0,
+  "attraction_error_rate": null,
+  "rq1_by_cue_condition": [
+    {
+      "rq1_condition": "no_cue",
+      "verbs": 24,
+      "analyzable_verbs": 10,
+      "target_like_verbs": 10,
+      "non_target_verbs": 0,
+      "unexpected_forms": 0,
+      "attraction_configurations": 0,
+      "attraction_errors": 0,
+      "avg_llm_confidence": 0.93375,
+      "agreement_accuracy": 1.0,
+      "attraction_error_rate": null
+    },
+    {
+      "rq1_condition": "pronoun",
+      "verbs": 23,
+      "analyzable_verbs": 22,
+      "target_like_verbs": 22,
+      "non_target_verbs": 0,
+      "unexpected_forms": 0,
+      "attraction_configurations": 0,
+      "attraction_errors": 0,
+      "avg_llm_confidence": 0.9521739130434782,
+      "agreement_accuracy": 1.0,
+      "attraction_error_rate": null
+    },
+    {
+      "rq1_condition": "weak_morphological",
+      "verbs": 2,
+      "analyzable_verbs": 2,
+      "target_like_verbs": 2,
+      "non_target_verbs": 0,
+      "unexpected_forms": 0,
+      "attraction_configurations": 0,
+      "attraction_errors": 0,
+      "avg_llm_confidence": 0.96,
+      "agreement_accuracy": 1.0,
+      "attraction_error_rate": null
+    },
+    {
+      "rq1_condition": "ambiguous",
+      "verbs": 1,
+      "analyzable_verbs": 0,
+      "target_like_verbs": 0,
+      "non_target_verbs": 0,
+      "unexpected_forms": 0,
+      "attraction_configurations": 0,
+      "attraction_errors": 0,
+      "avg_llm_confidence": 0.82,
+      "agreement_accuracy": NaN,
+      "attraction_error_rate": null
+    }
+  ],
+  "rq2_by_configuration": [
+    {
+      "rq2_configuration": "no_attraction",
+      "verbs": 50,
+      "analyzable_verbs": 34,
+      "target_like_verbs": 34,
+      "non_target_verbs": 0,
+      "unexpected_forms": 0,
+      "attraction_configurations": 0,
+      "attraction_errors": 0,
+      "avg_llm_confidence": 0.941,
+      "agreement_accuracy": 1.0,
+      "attraction_error_rate": null
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+file_id,source_path,utterances,learners,verb_count,analyzable_verb_count,target_like_verbs,non_target_verbs,unexpected_forms,attraction_configurations,attraction_errors,agreement_accuracy,avg_llm_confidence
+TS_FA_session01_page01,C:\Users\MANUE\Desktop\LLM analysis\Annotation.py,38,FA | TS,50,34,34,0,0,0,0,1.0,0.941

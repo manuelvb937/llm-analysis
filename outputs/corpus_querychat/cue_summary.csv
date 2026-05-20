@@ -1,0 +1,8 @@
+rq1_condition,cue_group,cue_type,cue_number,verbs,analyzable_verbs,target_like_verbs,non_target_verbs,unexpected_forms,attraction_configurations,attraction_errors,avg_llm_confidence,agreement_accuracy,attraction_error_rate
+no_cue,none,,,14,0,0,0,0,0,0,0.9278571428571428,,
+pronoun,pronoun,subject_pronoun,singular,14,13,13,0,0,0,0,0.9478571428571428,1.0,
+no_cue,none,expletive_subject,,10,10,10,0,0,0,0,0.942,1.0,
+pronoun,pronoun,demonstrative_pronoun,singular,8,8,8,0,0,0,0,0.9675,1.0,
+weak_morphological,morphological,singular_determiner_np,singular,2,2,2,0,0,0,0,0.96,1.0,
+ambiguous,ambiguous,subject_pronoun_semantically_variable,singular_or_plural,1,0,0,0,0,0,0,0.82,,
+pronoun,pronoun,singular_determiner_np,singular,1,1,1,0,0,0,0,0.89,1.0,

@@ -1,0 +1,3 @@
+learner_id,verbs,analyzable_verbs,target_like_verbs,non_target_verbs,unexpected_forms,attraction_configurations,attraction_errors,avg_llm_confidence,agreement_accuracy,attraction_error_rate
+TS,43,29,29,0,0,0,0,0.9358139534883722,1.0,
+FA,7,5,5,0,0,0,0,0.9728571428571428,1.0,

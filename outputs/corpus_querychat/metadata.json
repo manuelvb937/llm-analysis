@@ -1,0 +1,16 @@
+{
+  "input_path": "C:\\Users\\MANUE\\Desktop\\LLM analysis\\Annotation.py",
+  "output_dir": "C:\\Users\\MANUE\\Desktop\\LLM analysis\\outputs\\corpus_querychat",
+  "source_files": [
+    "C:\\Users\\MANUE\\Desktop\\LLM analysis\\Annotation.py"
+  ],
+  "skipped_files": [],
+  "tables": {
+    "verbs": "verbs.csv",
+    "utterances": "utterances.csv",
+    "files": "files.csv",
+    "learners": "learners.csv",
+    "cue_summary": "cue_summary.csv",
+    "attraction_summary": "attraction_summary.csv"
+  }
+}
