@@ -36,6 +36,26 @@ The current final JSON schema is expected to have top-level `file_id`, `utteranc
 
 Create a `.env` file from `.env.example` and add `GEMINI_API_KEY`.
 
+On Linux, from a fresh clone:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+cp .env.example .env
+# edit .env and set GEMINI_API_KEY if you want QueryChat
+shiny run --reload corpus_querychat_explorer/app.py
+```
+
+The prepared sample outputs are already committed, so the dashboard can open immediately after installing dependencies. To regenerate them from the included final annotation JSON:
+
+```bash
+python corpus_querychat_explorer/prepare_corpus_data.py TS_FA_session01_page01_annotation.json
+```
+
+On Windows:
+
 ```powershell
 shiny run --reload corpus_querychat_explorer/app.py
 ```

@@ -3,4 +3,5 @@ chatlas[google]
 duckdb
 pandas
 python-dotenv
+requests
 shiny
