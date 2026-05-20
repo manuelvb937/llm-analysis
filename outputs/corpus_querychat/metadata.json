@@ -1,8 +1,8 @@
 {
-  "input_path": "C:\\Users\\MANUE\\Desktop\\LLM analysis\\Annotation.py",
+  "input_path": "C:\\Users\\MANUE\\Desktop\\LLM analysis\\TS_FA_session01_page01_annotation.json",
   "output_dir": "C:\\Users\\MANUE\\Desktop\\LLM analysis\\outputs\\corpus_querychat",
   "source_files": [
-    "C:\\Users\\MANUE\\Desktop\\LLM analysis\\Annotation.py"
+    "C:\\Users\\MANUE\\Desktop\\LLM analysis\\TS_FA_session01_page01_annotation.json"
   ],
   "skipped_files": [],
   "tables": {

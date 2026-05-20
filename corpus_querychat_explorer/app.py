@@ -25,6 +25,7 @@ except ModuleNotFoundError:
 
 
 ROOT = Path(__file__).resolve().parents[1]
+# All Shiny tables are read from the prepared output directory.
 DATA_DIR = ROOT / "outputs" / "corpus_querychat"
 VERBS_PATH = DATA_DIR / "verbs.csv"
 UTTERANCES_PATH = DATA_DIR / "utterances.csv"
@@ -35,8 +36,10 @@ RESEARCH_SUMMARY_PATH = DATA_DIR / "research_summary.json"
 GREETING = Path(__file__).parent / "greeting.md"
 DATA_DESCRIPTION = Path(__file__).parent / "data_description.md"
 STYLES = Path(__file__).parent / "styles.css"
+DEFAULT_QUERYCHAT_GEMINI_MODEL = "gemini-2.5-flash-lite"
 
 
+# Columns that must stay textual after CSV reload.
 TEXT_COLUMNS = {
     "verb_uid",
     "source_path",
@@ -46,6 +49,8 @@ TEXT_COLUMNS = {
     "utterance_unit",
     "utterance_id",
     "learner_id",
+    "participant_id",
+    "participant_role",
     "speaker",
     "raw_utterance",
     "normalized_utterance",
@@ -55,6 +60,7 @@ TEXT_COLUMNS = {
     "lemma",
     "tense_mood",
     "category",
+    "category_coding_status",
     "subject_form",
     "head",
     "subject_type",
@@ -67,8 +73,8 @@ TEXT_COLUMNS = {
     "attractor_head",
     "attractor_number",
     "attractor_type",
-    "intervener_type",
     "structural_complexity_type",
+    "low_confidence_reason",
     "comments",
     "agreement_status",
     "cue_presence_label",
@@ -79,6 +85,7 @@ TEXT_COLUMNS = {
     "finite_status",
 }
 
+# Columns that should be numeric for averages, charts, and KPI calculations.
 NUMERIC_COLUMNS = {
     "verb_index",
     "linear_distance_words",
@@ -86,6 +93,7 @@ NUMERIC_COLUMNS = {
     "agreement_accuracy",
 }
 
+# Columns that should behave as booleans after CSV reload.
 BOOL_COLUMNS = {
     "cue_present",
     "attraction_configuration",
@@ -98,9 +106,13 @@ BOOL_COLUMNS = {
     "has_attraction_error",
 }
 
+# Preferred visible order for the verb and utterance data tables.
 DISPLAY_COLUMNS = [
     "file_id",
     "utterance_id",
+    "speaker",
+    "participant_id",
+    "participant_role",
     "learner_id",
     "produced_form",
     "produced_agreement",
@@ -109,6 +121,8 @@ DISPLAY_COLUMNS = [
     "target_form",
     "lemma",
     "tense_mood",
+    "category",
+    "category_coding_status",
     "subject_form",
     "head",
     "number",
@@ -122,11 +136,11 @@ DISPLAY_COLUMNS = [
     "attractor_surface_form",
     "attractor_number",
     "attractor_type",
-    "intervener_type",
     "structural_complexity_type",
     "rq2_configuration",
     "linear_distance_words",
     "llm_confidence",
+    "low_confidence_reason",
     "raw_utterance",
     "normalized_utterance",
     "comments",
@@ -140,6 +154,7 @@ HIDDEN_TABLE_COLUMNS = {
 STATUS_COLORS = {
     "target": "green",
     "non_target": "red",
+    "unexpected": "amber",
     "ambiguous": "amber",
     "not_applicable": "slate",
     "other": "violet",
@@ -148,12 +163,14 @@ STATUS_COLORS = {
 
 
 def _read_text(path: Path, fallback: str) -> str:
+    # Greeting and data-description files are optional conveniences for QueryChat.
     if path.exists():
         return path.read_text(encoding="utf-8")
     return fallback
 
 
 def _load_json_file(path: Path) -> dict[str, Any]:
+    # Metadata and research summaries are optional; the dashboard can run without them.
     if not path.exists():
         return {}
     with path.open("r", encoding="utf-8") as source:
@@ -162,6 +179,7 @@ def _load_json_file(path: Path) -> dict[str, Any]:
 
 
 def _coerce_bool(values: pd.Series) -> pd.Series:
+    # CSV booleans may reload as True/False strings, numbers, or actual booleans.
     if values.dtype == bool:
         return values.fillna(False)
     text = values.astype("string").str.lower().str.strip()
@@ -169,6 +187,7 @@ def _coerce_bool(values: pd.Series) -> pd.Series:
 
 
 def _load_table(path: Path, text_columns: set[str] | None = None) -> pd.DataFrame:
+    # Load a prepared CSV and immediately normalize its types.
     if not path.exists():
         return pd.DataFrame()
     text_columns = text_columns or set()
@@ -178,6 +197,7 @@ def _load_table(path: Path, text_columns: set[str] | None = None) -> pd.DataFram
 
 
 def _load_verbs() -> pd.DataFrame:
+    # The verb table is required because QueryChat and most dashboard charts depend on it.
     if not VERBS_PATH.exists():
         raise FileNotFoundError(
             "Missing prepared corpus table. Run "
@@ -187,6 +207,7 @@ def _load_verbs() -> pd.DataFrame:
 
 
 def _as_pandas(data: Any) -> pd.DataFrame:
+    # QueryChat can return Pandas-like, Polars-like, or other dataframe objects.
     if isinstance(data, pd.DataFrame):
         return data.copy()
     if hasattr(data, "to_pandas"):
@@ -200,6 +221,7 @@ def _as_pandas(data: Any) -> pd.DataFrame:
 
 
 def _clean_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    # Apply the same type rules to startup tables and QueryChat-filtered tables.
     clean = frame.copy()
     for column in TEXT_COLUMNS.intersection(clean.columns):
         clean[column] = clean[column].astype("string")
@@ -210,6 +232,10 @@ def _clean_frame(frame: pd.DataFrame) -> pd.DataFrame:
 
     if "agreement_status" not in clean and "produced_agreement" in clean:
         clean["agreement_status"] = clean["produced_agreement"].astype("string")
+    if "participant_id" not in clean and "learner_id" in clean:
+        clean["participant_id"] = clean["learner_id"]
+    if "learner_id" not in clean and "participant_id" in clean:
+        clean["learner_id"] = clean["participant_id"]
     if "cue_presence_label" not in clean and "cue_present" in clean:
         clean["cue_presence_label"] = clean["cue_present"].map(
             lambda value: "cue_present" if bool(value) else "no_cue"
@@ -218,34 +244,40 @@ def _clean_frame(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _bool_series(frame: pd.DataFrame, column: str) -> pd.Series:
+    # Missing boolean columns should behave like all-False filters.
     if column not in frame:
         return pd.Series(False, index=frame.index)
     return _coerce_bool(frame[column])
 
 
 def _format_count(value: int | float) -> str:
+    # KPI display helper.
     if pd.isna(value):
         return "0"
     return f"{int(value):,}"
 
 
 def _format_percent(value: float | None) -> str:
+    # KPI/chart display helper.
     if value is None or pd.isna(value):
         return "n/a"
     return f"{value * 100:.1f}%"
 
 
 def _rate(numerator: int | float, denominator: int | float) -> float | None:
+    # Avoid divide-by-zero in empty filtered selections.
     if denominator == 0:
         return None
     return float(numerator) / float(denominator)
 
 
 def _empty_state(message: str) -> str:
+    # Render a consistent empty panel for charts without data.
     return f"<div class='empty-state'>{html.escape(message)}</div>"
 
 
 def _pretty_label(value: Any) -> str:
+    # Convert stored snake_case values into dashboard labels.
     if value is None or pd.isna(value):
         return "Missing"
     text = str(value).strip()
@@ -255,6 +287,7 @@ def _pretty_label(value: Any) -> str:
 
 
 def _truncate(value: Any, limit: int = 220) -> str:
+    # Evidence cards need compact text so long utterances do not dominate the layout.
     text = "" if value is None or pd.isna(value) else str(value)
     text = " ".join(text.split())
     if len(text) <= limit:
@@ -263,6 +296,7 @@ def _truncate(value: Any, limit: int = 220) -> str:
 
 
 def _summary_by(frame: pd.DataFrame, group_columns: list[str]) -> pd.DataFrame:
+    # Shared dashboard summary helper; QueryChat filters flow through this function.
     if frame.empty:
         return pd.DataFrame()
     for column in group_columns:
@@ -306,27 +340,46 @@ def _summary_by(frame: pd.DataFrame, group_columns: list[str]) -> pd.DataFrame:
     return grouped.sort_values(["verbs", "non_target_verbs"], ascending=False)
 
 
-def _metrics(frame: pd.DataFrame) -> dict[str, int | float | None]:
+def _metrics(frame: pd.DataFrame, utterance_frame: pd.DataFrame | None = None) -> dict[str, int | float | None]:
+    # Compute all KPI tile values from the current verb selection.
     verbs = len(frame)
     analyzable = int(_bool_series(frame, "is_analyzable_agreement").sum())
     target_like = int(_bool_series(frame, "is_agreement_target_like").sum())
     non_target = int(_bool_series(frame, "is_agreement_non_target").sum())
     unexpected = int(_bool_series(frame, "is_unexpected_form").sum())
     cue_present = int(_bool_series(frame, "cue_present").sum())
-    strong_cues = int(frame.get("rq1_condition", pd.Series(index=frame.index)).astype("string").eq("strong_lexical_semantic").sum())
-    weak_cues = int(frame.get("rq1_condition", pd.Series(index=frame.index)).astype("string").eq("weak_morphological").sum())
     attraction_configs = int(_bool_series(frame, "has_attraction").sum())
     attraction_errors = int(_bool_series(frame, "has_attraction_error").sum())
-    learners = int(frame["learner_id"].nunique(dropna=True)) if "learner_id" in frame else 0
+    identity_column = "participant_id" if "participant_id" in frame else "learner_id"
+    participants = int(frame[identity_column].nunique(dropna=True)) if identity_column in frame else 0
     files = int(frame["file_id"].nunique(dropna=True)) if "file_id" in frame else 0
+    utterance_count_frame = utterance_frame if utterance_frame is not None else frame
     utterances = 0
-    if {"file_id", "utterance_id"}.issubset(frame.columns):
-        utterances = int(frame[["file_id", "utterance_id"]].drop_duplicates().shape[0])
+    if utterance_frame is not None and "utterance_uid" in utterance_count_frame:
+        utterances = int(utterance_count_frame["utterance_uid"].nunique(dropna=True))
+    elif {"file_id", "utterance_id"}.issubset(utterance_count_frame.columns):
+        utterances = int(utterance_count_frame[["file_id", "utterance_id"]].drop_duplicates().shape[0])
+    low_reason = (
+        frame["low_confidence_reason"].astype("string").fillna("").str.strip().ne("")
+        if "low_confidence_reason" in frame
+        else pd.Series(False, index=frame.index)
+    )
+    low_score = (
+        pd.to_numeric(frame["llm_confidence"], errors="coerce").lt(0.75)
+        if "llm_confidence" in frame
+        else pd.Series(False, index=frame.index)
+    )
+    pending_category = int(
+        frame.get("category_coding_status", pd.Series(index=frame.index))
+        .astype("string")
+        .eq("pending_human_coding")
+        .sum()
+    )
 
     return {
         "verbs": verbs,
         "files": files,
-        "learners": learners,
+        "participants": participants,
         "utterances": utterances,
         "analyzable": analyzable,
         "target_like": target_like,
@@ -334,30 +387,31 @@ def _metrics(frame: pd.DataFrame) -> dict[str, int | float | None]:
         "unexpected": unexpected,
         "accuracy": _rate(target_like, analyzable),
         "cue_present": cue_present,
-        "strong_cues": strong_cues,
-        "weak_cues": weak_cues,
         "cue_present_share": _rate(cue_present, verbs),
         "attraction_configs": attraction_configs,
         "attraction_errors": attraction_errors,
         "attraction_error_rate": _rate(attraction_errors, attraction_configs),
+        "low_confidence": int((low_reason | low_score).sum()),
+        "pending_category": pending_category,
     }
 
 
-def _metric_tiles(frame: pd.DataFrame) -> str:
-    values = _metrics(frame)
+def _metric_tiles(frame: pd.DataFrame, utterance_frame: pd.DataFrame | None = None) -> str:
+    # Convert KPI values into the dashboard's HTML card grid.
+    values = _metrics(frame, utterance_frame)
     tiles = [
         ("Files", _format_count(values["files"]), "Source recordings", "blue"),
-        ("Learners", _format_count(values["learners"]), "Learner IDs", "teal"),
-        ("Utterances", _format_count(values["utterances"]), "With annotated verbs", "violet"),
+        ("Participants", _format_count(values["participants"]), "Speaker-map IDs", "teal"),
+        ("Utterances", _format_count(values["utterances"]), "Transcript lines", "violet"),
         ("Verb Tokens", _format_count(values["verbs"]), "Current selection", "blue"),
         ("Analyzable", _format_count(values["analyzable"]), "Finite agreement cases", "slate"),
         ("Accuracy", _format_percent(values["accuracy"]), "Target-like / analyzable", "green"),
         ("Non-target", _format_count(values["non_target"]), "Agreement errors", "red"),
-        ("Unexpected", _format_count(values["unexpected"]), "Unexpected forms", "amber"),
-        ("Cue Present", _format_count(values["cue_present"]), _format_percent(values["cue_present_share"]), "teal"),
-        ("Strong Cues", _format_count(values["strong_cues"]), "Lexical-semantic", "green"),
-        ("Weak Cues", _format_count(values["weak_cues"]), "Morphological", "amber"),
-        ("Attraction Errors", _format_count(values["attraction_errors"]), _format_percent(values["attraction_error_rate"]), "red"),
+        ("Unexpected", _format_count(values["unexpected"]), "Excluded from accuracy", "amber"),
+        ("Cued Verbs", _format_count(values["cue_present"]), _format_percent(values["cue_present_share"]), "teal"),
+        ("Attraction", _format_count(values["attraction_configs"]), f"{_format_count(values['attraction_errors'])} errors", "red"),
+        ("Low Confidence", _format_count(values["low_confidence"]), "< 0.75 or reason given", "amber"),
+        ("Pending Coding", _format_count(values["pending_category"]), "Category needs human coding", "slate"),
     ]
 
     cards = []
@@ -373,6 +427,7 @@ def _metric_tiles(frame: pd.DataFrame) -> str:
 
 
 def _agreement_chart(frame: pd.DataFrame) -> str:
+    # Stacked status bar for target, non-target, unexpected, and other labels.
     if frame.empty or "agreement_status" not in frame:
         return _empty_state("No agreement-status values in the current selection.")
 
@@ -404,6 +459,7 @@ def _agreement_chart(frame: pd.DataFrame) -> str:
 
 
 def _accuracy_bars(frame: pd.DataFrame, group_column: str, limit: int = 10) -> str:
+    # Horizontal bars where width represents agreement accuracy by category.
     summary = _summary_by(frame, [group_column])
     if summary.empty:
         return _empty_state(f"No {group_column} values in the current selection.")
@@ -437,6 +493,7 @@ def _accuracy_bars(frame: pd.DataFrame, group_column: str, limit: int = 10) -> s
 
 
 def _count_bars(frame: pd.DataFrame, column: str, limit: int = 12) -> str:
+    # Horizontal bars where width represents frequency by category.
     if frame.empty or column not in frame:
         return _empty_state(f"No {column} values in the current selection.")
     counts = frame[column].astype("string").fillna("missing").value_counts().head(limit)
@@ -460,12 +517,19 @@ def _count_bars(frame: pd.DataFrame, column: str, limit: int = 12) -> str:
     return f"<div class='bar-chart'>{''.join(rows)}</div>"
 
 
+def _attraction_only(frame: pd.DataFrame) -> pd.DataFrame:
+    # Attractor fields are meaningful only when an attraction configuration exists.
+    if frame.empty:
+        return frame.copy()
+    return frame[_bool_series(frame, "has_attraction")].copy()
+
+
 def _rq_snapshot(frame: pd.DataFrame) -> str:
+    # High-level research cards for cue presence, attraction, and coding quality.
     if frame.empty:
         return _empty_state("No rows in the current selection.")
 
-    cue_summary = _summary_by(frame, ["rq1_condition"])
-    attraction_summary = _summary_by(frame, ["rq2_configuration"])
+    cue_summary = _summary_by(frame, ["cue_presence_label"])
 
     def lookup(summary: pd.DataFrame, column: str, key: str, metric: str) -> Any:
         if summary.empty or column not in summary:
@@ -475,28 +539,32 @@ def _rq_snapshot(frame: pd.DataFrame) -> str:
             return None
         return rows.iloc[0].get(metric)
 
-    strong_acc = lookup(cue_summary, "rq1_condition", "strong_lexical_semantic", "agreement_accuracy")
-    weak_acc = lookup(cue_summary, "rq1_condition", "weak_morphological", "agreement_accuracy")
-    strong_n = lookup(cue_summary, "rq1_condition", "strong_lexical_semantic", "analyzable_verbs") or 0
-    weak_n = lookup(cue_summary, "rq1_condition", "weak_morphological", "analyzable_verbs") or 0
-    relative_rate = lookup(attraction_summary, "rq2_configuration", "relative_clause", "attraction_error_rate")
-    pp_rate = lookup(attraction_summary, "rq2_configuration", "prepositional_phrase", "attraction_error_rate")
-    relative_n = lookup(attraction_summary, "rq2_configuration", "relative_clause", "attraction_configurations") or 0
-    pp_n = lookup(attraction_summary, "rq2_configuration", "prepositional_phrase", "attraction_configurations") or 0
+    values = _metrics(frame)
+    cued_acc = lookup(cue_summary, "cue_presence_label", "cue_present", "agreement_accuracy")
+    no_cue_acc = lookup(cue_summary, "cue_presence_label", "no_cue", "agreement_accuracy")
+    cued_n = lookup(cue_summary, "cue_presence_label", "cue_present", "analyzable_verbs") or 0
+    no_cue_n = lookup(cue_summary, "cue_presence_label", "no_cue", "analyzable_verbs") or 0
 
     cards = [
         (
-            "RQ1 Cue Strength",
+            "Cue Presence",
             [
-                ("Strong lexical-semantic", _format_percent(strong_acc), f"{int(strong_n):,} analyzable"),
-                ("Weak morphological", _format_percent(weak_acc), f"{int(weak_n):,} analyzable"),
+                ("Cued verbs", _format_percent(cued_acc), f"{int(cued_n):,} analyzable"),
+                ("No cue", _format_percent(no_cue_acc), f"{int(no_cue_n):,} analyzable"),
             ],
         ),
         (
-            "RQ2 Attraction",
+            "Attraction",
             [
-                ("Relative clause", _format_percent(relative_rate), f"{int(relative_n):,} configurations"),
-                ("Prepositional phrase", _format_percent(pp_rate), f"{int(pp_n):,} configurations"),
+                ("Configurations", _format_count(values["attraction_configs"]), f"{_format_count(values['attraction_errors'])} errors"),
+                ("Error rate", _format_percent(values["attraction_error_rate"]), "errors / configurations"),
+            ],
+        ),
+        (
+            "Coding Quality",
+            [
+                ("Low confidence", _format_count(values["low_confidence"]), "< 0.75 or reason given"),
+                ("Pending category", _format_count(values["pending_category"]), "category_coding_status"),
             ],
         ),
     ]
@@ -522,6 +590,7 @@ def _rq_snapshot(frame: pd.DataFrame) -> str:
 
 
 def _attraction_cards(frame: pd.DataFrame) -> str:
+    # Compact cards for actual attraction configurations, excluding no-attraction rows.
     summary = _summary_by(frame, ["rq2_configuration"])
     if summary.empty:
         return _empty_state("No attraction configuration values in the current selection.")
@@ -547,6 +616,7 @@ def _attraction_cards(frame: pd.DataFrame) -> str:
 
 
 def _distance_chart(frame: pd.DataFrame) -> str:
+    # Distance chart uses bins produced by prepare_corpus_data.py.
     ordered = ["0", "1_2", "3_5", "6_plus", "unknown"]
     summary = _summary_by(frame, ["distance_bin"])
     if summary.empty:
@@ -575,6 +645,7 @@ def _distance_chart(frame: pd.DataFrame) -> str:
 
 
 def _confidence_chart(frame: pd.DataFrame) -> str:
+    # Bucket model confidence scores and reuse the accuracy bar renderer.
     if frame.empty or "llm_confidence" not in frame:
         return _empty_state("No confidence scores in the current selection.")
     working = frame.dropna(subset=["llm_confidence"]).copy()
@@ -590,6 +661,7 @@ def _confidence_chart(frame: pd.DataFrame) -> str:
 
 
 def _evidence_cards(frame: pd.DataFrame, limit: int = 8) -> str:
+    # Evidence cards prioritize errors, unexpected forms, and attraction errors.
     if frame.empty:
         return _empty_state("No verb rows in the current selection.")
     flags = (
@@ -636,13 +708,22 @@ def _evidence_cards(frame: pd.DataFrame, limit: int = 8) -> str:
 
 
 def _filtered_utterances_for(frame: pd.DataFrame) -> pd.DataFrame:
+    # Keep utterance-level rows aligned with the current QueryChat verb filter.
     if utterances.empty or frame.empty or not {"file_id", "utterance_id"}.issubset(frame.columns):
         return utterances.iloc[0:0].copy() if frame.empty else utterances.copy()
+    if len(frame) == len(verbs):
+        if "verb_uid" not in frame or "verb_uid" not in verbs:
+            return utterances.copy()
+        selected_ids = set(frame["verb_uid"].astype("string").dropna())
+        all_ids = set(verbs["verb_uid"].astype("string").dropna())
+        if selected_ids == all_ids:
+            return utterances.copy()
     keys = frame[["file_id", "utterance_id"]].drop_duplicates()
     return utterances.merge(keys, on=["file_id", "utterance_id"], how="inner")
 
 
 def _display_table(frame: pd.DataFrame) -> pd.DataFrame:
+    # Data tab table formatter: order columns and round numeric display fields.
     if frame.empty:
         return frame
     preferred = [column for column in DISPLAY_COLUMNS if column in frame.columns]
@@ -652,6 +733,11 @@ def _display_table(frame: pd.DataFrame) -> pd.DataFrame:
         if column not in preferred and column not in HIDDEN_TABLE_COLUMNS
     ]
     table = frame.loc[:, preferred + remaining].copy()
+    if {"participant_id", "learner_id"}.issubset(table.columns):
+        participant = table["participant_id"].astype("string").fillna("")
+        learner = table["learner_id"].astype("string").fillna("")
+        if participant.eq(learner).all():
+            table = table.drop(columns=["learner_id"])
     for column in ("agreement_accuracy", "llm_confidence", "linear_distance_words"):
         if column in table:
             table[column] = pd.to_numeric(table[column], errors="coerce").round(3)
@@ -659,6 +745,7 @@ def _display_table(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _summary_table(frame: pd.DataFrame, group_columns: list[str]) -> pd.DataFrame:
+    # Data-frame renderer helper for grouped summary tables.
     summary = _summary_by(frame, group_columns)
     if summary.empty:
         return summary
@@ -669,22 +756,25 @@ def _summary_table(frame: pd.DataFrame, group_columns: list[str]) -> pd.DataFram
 
 
 def _file_summary_table(frame: pd.DataFrame) -> pd.DataFrame:
+    # File summary is recalculated from the current filtered verb set.
     summary = _summary_table(frame, ["file_id"])
     if summary.empty:
         return summary
-    learners_by_file = (
-        frame.groupby("file_id", dropna=False)["learner_id"]
+    identity_column = "participant_id" if "participant_id" in frame else "learner_id"
+    participants_by_file = (
+        frame.groupby("file_id", dropna=False)[identity_column]
         .apply(lambda values: " | ".join(sorted({str(value) for value in values.dropna()})))
-        .reset_index(name="learners")
-        if {"file_id", "learner_id"}.issubset(frame.columns)
+        .reset_index(name="participants")
+        if {"file_id", identity_column}.issubset(frame.columns)
         else pd.DataFrame()
     )
-    if not learners_by_file.empty:
-        summary = summary.merge(learners_by_file, on="file_id", how="left")
+    if not participants_by_file.empty:
+        summary = summary.merge(participants_by_file, on="file_id", how="left")
     return summary
 
 
 def _querychat_tools() -> tuple[str, ...]:
+    # Visualization tools are enabled only when optional packages are installed.
     if os.getenv("QUERYCHAT_ENABLE_VIZ", "true").lower() in {"0", "false", "no"}:
         return ("update", "query")
     required = ("altair", "ggsql", "shinywidgets", "vl_convert")
@@ -695,6 +785,7 @@ def _querychat_tools() -> tuple[str, ...]:
 
 load_dotenv(ROOT / ".env")
 
+# Startup data load: Shiny reads prepared CSV/JSON files once when the process starts.
 verbs = _load_verbs()
 utterances = _load_table(UTTERANCES_PATH, TEXT_COLUMNS | {"utterance_uid"})
 files = _load_table(FILES_PATH, TEXT_COLUMNS)
@@ -711,8 +802,9 @@ else:
     if not gemini_api_key:
         querychat_status = "Set GEMINI_API_KEY in .env to enable QueryChat."
     else:
+        # QueryChat receives the verb-level table as its main queryable dataset.
         client = ChatGoogle(
-            model=os.getenv("QUERYCHAT_GEMINI_MODEL", "gemini-2.5-flash"),
+            model=os.getenv("QUERYCHAT_GEMINI_MODEL", DEFAULT_QUERYCHAT_GEMINI_MODEL),
             api_key=gemini_api_key,
         )
         qc = QueryChat(
@@ -726,6 +818,7 @@ else:
 
 
 def _sidebar():
+    # Use QueryChat's sidebar when configured; otherwise show setup guidance.
     if qc is not None:
         return qc.sidebar(width=420)
     return ui.sidebar(
@@ -737,6 +830,7 @@ def _sidebar():
 
 
 def app_ui(request):
+    # Static Shiny UI layout; dynamic content is provided by server render functions.
     return ui.page_sidebar(
         _sidebar(),
         ui.include_css(STYLES),
@@ -833,8 +927,8 @@ def app_ui(request):
                             class_="dashboard-card chart-card",
                         ),
                         ui.card(
-                            ui.card_header("Intervener Type"),
-                            ui.output_ui("intervener_chart"),
+                            ui.card_header("Attractor Number"),
+                            ui.output_ui("attractor_number_chart"),
                             class_="dashboard-card chart-card",
                         ),
                         col_widths=(7, 5),
@@ -860,10 +954,10 @@ def app_ui(request):
                     value="rq2",
                 ),
                 ui.nav_panel(
-                    "Learners",
+                    "Participants",
                     ui.layout_columns(
                         ui.card(
-                            ui.card_header("Learner Summary"),
+                            ui.card_header("Participant Summary"),
                             ui.output_data_frame("learner_summary_table"),
                             class_="dashboard-card data-card",
                         ),
@@ -874,7 +968,7 @@ def app_ui(request):
                         ),
                         col_widths=(6, 6),
                     ),
-                    value="learners",
+                    value="participants",
                 ),
                 ui.nav_panel(
                     "Evidence",
@@ -920,6 +1014,7 @@ def app_ui(request):
 
 
 def server(input: Inputs, output: Outputs, session: Session) -> None:
+    # qc_vals exposes QueryChat's filtered dataframe, generated SQL, and title.
     qc_vals = qc.server(enable_bookmarking=False) if qc is not None else None
 
     @reactive.effect
@@ -931,12 +1026,14 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
 
     @reactive.calc
     def filtered_verbs() -> pd.DataFrame:
+        # Every chart reads this reactive table, so QueryChat filters propagate everywhere.
         if qc_vals is None:
             return verbs.copy()
         return _clean_frame(_as_pandas(qc_vals.df()))
 
     @reactive.calc
     def filtered_utterances() -> pd.DataFrame:
+        # Utterance rows follow the selected verb rows where possible.
         return _filtered_utterances_for(filtered_verbs())
 
     @render.text
@@ -954,7 +1051,7 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
 
     @render.ui
     def metric_tiles():
-        return ui.HTML(_metric_tiles(filtered_verbs()))
+        return ui.HTML(_metric_tiles(filtered_verbs(), filtered_utterances()))
 
     @render.ui
     def rq_snapshot():
@@ -989,12 +1086,12 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
         return ui.HTML(_accuracy_bars(filtered_verbs(), "structural_complexity_type", limit=12))
 
     @render.ui
-    def intervener_chart():
-        return ui.HTML(_accuracy_bars(filtered_verbs(), "intervener_type", limit=10))
+    def attractor_number_chart():
+        return ui.HTML(_count_bars(_attraction_only(filtered_verbs()), "attractor_number", limit=10))
 
     @render.ui
     def attractor_chart():
-        return ui.HTML(_count_bars(filtered_verbs(), "attractor_type"))
+        return ui.HTML(_count_bars(_attraction_only(filtered_verbs()), "attractor_type"))
 
     @render.ui
     def distance_chart():
@@ -1026,13 +1123,19 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
     @render.data_frame
     def attraction_summary_table():
         return _summary_table(
-            filtered_verbs(),
-            ["rq2_configuration", "intervener_type", "attractor_type", "structural_complexity_type"],
+            _attraction_only(filtered_verbs()),
+            ["rq2_configuration", "attractor_type", "attractor_number", "structural_complexity_type"],
         )
 
     @render.data_frame
     def learner_summary_table():
-        return _summary_table(filtered_verbs(), ["learner_id"])
+        frame = filtered_verbs()
+        if "participant_id" in frame:
+            group_columns = ["participant_id"]
+            if "participant_role" in frame:
+                group_columns.append("participant_role")
+            return _summary_table(frame, group_columns)
+        return _summary_table(frame, ["learner_id"])
 
     @render.data_frame
     def file_summary_table():

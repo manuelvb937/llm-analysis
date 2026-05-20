@@ -1,0 +1,68 @@
+{
+  "file_id": "<string: e.g., TS_FA_session01_page01>",
+  "utterance_unit": "line_break",
+
+  "speaker_map": {
+    "<speaker_code>": {
+      "participant_id": "<string: stable participant ID, e.g., P001>",
+      "role": "<learner | interlocutor | researcher | other>"
+    }
+  },
+
+  "utterances": [
+    {
+      "utterance_id": "<string: e.g., utt_001>",
+      "speaker": "<string: e.g., TS>",
+      "participant_id": "<string or null: e.g., P001>",
+      "raw_utterance": "<string: original utterance exactly as transcribed>",
+      "normalized_utterance": "<string: lightly normalized utterance for interpretation>",
+
+      "verbs": [
+        {
+          "verb_index": 1,
+          "produced_form": "<string: verb form produced by the learner>",
+          "produced_agreement": "<target | non-target | unexpected>",
+          "target_form": "<string or null>",
+          "lemma": "<string: infinitive/dictionary form>",
+
+          "tense_mood": "<present_indicative | imparfait_indicative | passé_composé | plus_que_parfait | future_simple | futur_proche | conditional | subjunctive | imperative | infinitive | past_participle | unknown>",
+
+          "category": null,
+          "category_coding_status": "pending_human_coding",
+
+          "subject": {
+            "subject_form": "<string or null>",
+            "head": "<string or null>",
+            "subject_type": "<pronoun | np | relative pronoun | demonstrative pronoun | other>",
+            "person": "<1 | 2 | 3 | null>",
+            "number": "<singular | plural | ambiguous | null>"
+          },
+
+          "cue_strength": {
+            "cue_present": true,
+            "cue_expression": "<string or null>",
+            "cue_type": "<quantifier | numeral | none | ambiguous>",
+            "cue_number": "<singular | plural | ambiguous | null>"
+          },
+
+          "attraction": {
+            "attraction_configuration": false,
+            "attraction_error": false,
+            "attractor_surface_form": "<string or null>",
+            "attractor_head": "<string or null>",
+            "attractor_number": "<singular | plural | ambiguous | null>",
+            "attractor_type": "<np | pp | relative_clause | object | other | null>",
+            "structural_complexity_type": "<simple_subject_verb | subject_auxiliary_participle | relative_clause | embedded_clause | infinitival_complement | existential_construction | impersonal_expression | false_start | fragment | other>",
+            "linear_distance_words": "<integer or null>"
+          },
+
+          "annotation_metadata": {
+            "llm_confidence": 0.0,
+            "low_confidence_reason": "<string or null>",
+            "comments": "<string>"
+          }
+        }
+      ]
+    }
+  ]
+}

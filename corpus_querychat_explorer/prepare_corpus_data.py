@@ -14,7 +14,8 @@ except ModuleNotFoundError:
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_INPUT = ROOT / "Annotation.py"
+# Prefer the new final-output naming pattern, but keep Annotation.py as an old fallback.
+DEFAULT_INPUT = next(iter(sorted(ROOT.glob("*_annotation.json"))), ROOT / "Annotation.py")
 DEFAULT_OUTPUT_DIR = ROOT / "outputs" / "corpus_querychat"
 
 VERBS_FILENAME = "verbs.csv"
@@ -30,6 +31,7 @@ DUCKDB_FILENAME = "corpus_analysis.duckdb"
 SOURCE_EXTENSIONS = {".json", ".py", ".txt"}
 
 
+# This is the canonical verb-level table schema consumed by Shiny and QueryChat.
 VERB_COLUMNS = [
     "verb_uid",
     "source_path",
@@ -39,6 +41,8 @@ VERB_COLUMNS = [
     "utterance_unit",
     "utterance_id",
     "learner_id",
+    "participant_id",
+    "participant_role",
     "speaker",
     "raw_utterance",
     "normalized_utterance",
@@ -49,6 +53,7 @@ VERB_COLUMNS = [
     "lemma",
     "tense_mood",
     "category",
+    "category_coding_status",
     "subject_form",
     "head",
     "subject_type",
@@ -64,10 +69,10 @@ VERB_COLUMNS = [
     "attractor_head",
     "attractor_number",
     "attractor_type",
-    "intervener_type",
     "structural_complexity_type",
     "linear_distance_words",
     "llm_confidence",
+    "low_confidence_reason",
     "comments",
     "agreement_status",
     "agreement_accuracy",
@@ -85,6 +90,7 @@ VERB_COLUMNS = [
     "finite_status",
 ]
 
+# This is the utterance-level table schema; one row equals one transcript line.
 UTTERANCE_COLUMNS = [
     "utterance_uid",
     "source_path",
@@ -92,6 +98,8 @@ UTTERANCE_COLUMNS = [
     "annotation_scope",
     "utterance_id",
     "learner_id",
+    "participant_id",
+    "participant_role",
     "speaker",
     "raw_utterance",
     "normalized_utterance",
@@ -106,6 +114,7 @@ UTTERANCE_COLUMNS = [
 ]
 
 
+# CSV readers can otherwise convert ids like 001 or booleans into the wrong type.
 TEXT_ID_COLUMNS = {
     "verb_uid",
     "source_path",
@@ -115,6 +124,8 @@ TEXT_ID_COLUMNS = {
     "utterance_unit",
     "utterance_id",
     "learner_id",
+    "participant_id",
+    "participant_role",
     "speaker",
     "raw_utterance",
     "normalized_utterance",
@@ -124,6 +135,7 @@ TEXT_ID_COLUMNS = {
     "lemma",
     "tense_mood",
     "category",
+    "category_coding_status",
     "subject_form",
     "head",
     "subject_type",
@@ -136,8 +148,8 @@ TEXT_ID_COLUMNS = {
     "attractor_head",
     "attractor_number",
     "attractor_type",
-    "intervener_type",
     "structural_complexity_type",
+    "low_confidence_reason",
     "comments",
     "agreement_status",
     "cue_presence_label",
@@ -150,12 +162,33 @@ TEXT_ID_COLUMNS = {
 
 
 def _csv_value(value: Any) -> Any:
+    # CSV cells cannot hold nested Python objects, so preserve them as JSON strings.
     if isinstance(value, (dict, list)):
         return json.dumps(value, ensure_ascii=False)
     return value
 
 
+def _json_safe(value: Any) -> Any:
+    # json.dumps(..., allow_nan=False) rejects pandas/NumPy NaN values, so normalize them.
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if hasattr(value, "item"):
+        try:
+            return _json_safe(value.item())
+        except (TypeError, ValueError):
+            pass
+    return value
+
+
 def _label(value: Any) -> str:
+    # Convert any scalar-ish annotation value into a clean display/query string.
     if value is None:
         return ""
     if isinstance(value, list):
@@ -166,6 +199,7 @@ def _label(value: Any) -> str:
 
 
 def _normal(value: Any) -> str:
+    # Normalized labels make string matching robust to spaces, hyphens, and case.
     text = _label(value).lower().strip()
     return (
         text.replace("-", "_")
@@ -176,6 +210,7 @@ def _normal(value: Any) -> str:
 
 
 def _as_bool(value: Any) -> bool:
+    # Model outputs and CSV reloads can represent booleans as bools, numbers, or strings.
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)) and not pd.isna(value):
@@ -185,6 +220,7 @@ def _as_bool(value: Any) -> bool:
 
 
 def _as_number(value: Any) -> float | None:
+    # Numeric annotation fields can be null, blank, strings, or actual numbers.
     if value is None or value == "":
         return None
     try:
@@ -199,10 +235,37 @@ def _as_number(value: Any) -> float | None:
 
 
 def _get(mapping: Any, key: str, default: Any = None) -> Any:
+    # Safe dict access keeps malformed rows from crashing the whole preparation run.
     return mapping.get(key, default) if isinstance(mapping, dict) else default
 
 
+def _participant_fields(document: dict[str, Any], utterance: dict[str, Any]) -> dict[str, str | None]:
+    # Final JSON stores stable participant ids either on utterances or in top-level speaker_map.
+    speaker = _label(_get(utterance, "speaker"))
+    speaker_map = _get(document, "speaker_map", {})
+    speaker_info = _get(speaker_map, speaker, {})
+
+    # learner_id is retained as a backward-compatible alias for older dashboard queries.
+    participant_id = (
+        _label(_get(utterance, "participant_id"))
+        or _label(_get(speaker_info, "participant_id"))
+        or _label(_get(utterance, "learner_id"))
+    )
+    participant_role = (
+        _label(_get(utterance, "participant_role"))
+        or _label(_get(speaker_info, "role"))
+    )
+    learner_id = _label(_get(utterance, "learner_id")) or participant_id
+
+    return {
+        "learner_id": learner_id or None,
+        "participant_id": participant_id or None,
+        "participant_role": participant_role or None,
+    }
+
+
 def _load_json(path: Path) -> Any:
+    # Try common encodings because transcript exports may include BOMs or Windows text.
     last_error: Exception | None = None
     for encoding in ("utf-8", "utf-8-sig", "cp1252"):
         try:
@@ -213,6 +276,7 @@ def _load_json(path: Path) -> Any:
 
 
 def _source_files(input_path: Path) -> list[Path]:
+    # The prep script can process one file or recursively process a folder.
     if input_path.is_file():
         return [input_path]
     if not input_path.exists():
@@ -228,10 +292,12 @@ def _source_files(input_path: Path) -> list[Path]:
 
 
 def _documents_from_payload(payload: Any) -> Iterable[dict[str, Any]]:
+    # Accept the final single-document shape directly.
     if isinstance(payload, dict) and isinstance(payload.get("utterances"), list):
         yield payload
         return
 
+    # Also accept wrapper lists or batch envelopes for future multi-file runs.
     if isinstance(payload, list):
         for item in payload:
             yield from _documents_from_payload(item)
@@ -244,9 +310,12 @@ def _documents_from_payload(payload: Any) -> Iterable[dict[str, Any]]:
 
 
 def _agreement_status(value: Any) -> str:
+    # Normalize final and legacy agreement labels into a small analysis vocabulary.
     text = _normal(value)
     if not text:
         return "unknown"
+    if text == "unexpected" or text.startswith("unexpected_"):
+        return "unexpected"
     if "not_applicable" in text or text in {"na", "n_a", "non_finite"}:
         return "not_applicable"
     if "ambiguous" in text or "uncertain" in text:
@@ -258,42 +327,37 @@ def _agreement_status(value: Any) -> str:
     return "other"
 
 
-def _cue_group(cue_present: bool, cue_type: Any, cue_expression: Any) -> str:
+def _cue_group(cue_present: bool, cue_type: Any) -> str:
+    # Final-schema cue_type is already tightly controlled, so do not infer cues from words.
     cue_type_text = _normal(cue_type)
-    expression_text = _normal(cue_expression)
-    combined = f"{cue_type_text} {expression_text}"
 
-    if not cue_present:
+    if cue_type_text in {"quantifier", "numeral", "ambiguous"}:
+        return cue_type_text
+    if cue_type_text in {"", "none", "null"}:
         return "none"
-    if "ambiguous" in combined or "variable" in combined:
-        return "ambiguous"
-    if any(token in combined for token in ("lexical", "semantic", "quant", "plusieurs", "beaucoup", "quelques", "nombreux", "tous")):
-        return "lexical_semantic"
-    if any(token in combined for token in ("pronoun", "pronom", "je", "tu", "il", "elle", "on", "nous", "vous", "ils", "elles", "ce", "c'")):
-        return "pronoun"
-    if any(token in combined for token in ("morph", "determiner", "determinant", "article", "les", "des", "ces", "mes", "tes", "ses", "nos", "vos", "leurs", "le", "la", "un", "une")):
-        return "morphological"
-    if cue_type_text in {"none", "null"}:
-        return "none"
-    return "other"
+    if cue_present:
+        return "other_explicit_quantity"
+    return "none"
 
 
 def _rq1_condition(cue_group: str) -> str:
+    # RQ1 buckets now mirror the final cue_type schema instead of legacy heuristics.
     return {
-        "lexical_semantic": "strong_lexical_semantic",
-        "morphological": "weak_morphological",
-        "pronoun": "pronoun",
+        "quantifier": "quantifier",
+        "numeral": "numeral",
         "none": "no_cue",
         "ambiguous": "ambiguous",
+        "other_explicit_quantity": "other_explicit_quantity",
     }.get(cue_group, "other_cue")
 
 
-def _rq2_configuration(has_attraction: bool, attractor_type: Any, intervener_type: Any, complexity_type: Any) -> str:
+def _rq2_configuration(has_attraction: bool, attractor_type: Any, complexity_type: Any) -> str:
+    # RQ2 buckets are derived only from fields that exist in the final JSON template.
     if not has_attraction:
         return "no_attraction"
 
     combined = " ".join(
-        _normal(value) for value in (attractor_type, intervener_type, complexity_type)
+        _normal(value) for value in (attractor_type, complexity_type)
     )
     if "relative" in combined:
         return "relative_clause"
@@ -311,6 +375,7 @@ def _rq2_configuration(has_attraction: bool, attractor_type: Any, intervener_typ
 
 
 def _distance_bin(value: Any) -> str:
+    # Binned distance keeps dashboard charts readable.
     number = _as_number(value)
     if number is None:
         return "unknown"
@@ -324,6 +389,7 @@ def _distance_bin(value: Any) -> str:
 
 
 def _finite_status(tense_mood: Any, agreement_status: str) -> str:
+    # Accuracy denominators usually need to separate finite agreement from non-finite forms.
     text = _normal(tense_mood)
     if agreement_status == "not_applicable":
         return "non_finite_or_not_applicable"
@@ -341,6 +407,7 @@ def _verb_row(
     verb: dict[str, Any],
     verb_position: int,
 ) -> dict[str, Any]:
+    # Flatten one nested verb annotation into one CSV-ready row.
     subject = _get(verb, "subject", {})
     cue = _get(verb, "cue_strength", {})
     attraction = _get(verb, "attraction", {})
@@ -348,10 +415,11 @@ def _verb_row(
 
     file_id = _label(_get(utterance, "file_id")) or _label(_get(document, "file_id")) or source_path.stem
     utterance_id = _label(_get(utterance, "utterance_id")) or f"utt_{verb_position:03d}"
+    participant = _participant_fields(document, utterance)
     produced_agreement = _get(verb, "produced_agreement")
     agreement_status = _agreement_status(produced_agreement)
     cue_present = _as_bool(_get(cue, "cue_present"))
-    cue_group = _cue_group(cue_present, _get(cue, "cue_type"), _get(cue, "cue_expression"))
+    cue_group = _cue_group(cue_present, _get(cue, "cue_type"))
     has_attraction = _as_bool(_get(attraction, "attraction_configuration"))
     has_attraction_error = _as_bool(_get(attraction, "attraction_error"))
     finite_status = _finite_status(_get(verb, "tense_mood"), agreement_status)
@@ -364,7 +432,9 @@ def _verb_row(
         "annotation_notes": _get(document, "annotation_notes"),
         "utterance_unit": _get(document, "utterance_unit"),
         "utterance_id": utterance_id,
-        "learner_id": _get(utterance, "learner_id"),
+        "learner_id": participant["learner_id"],
+        "participant_id": participant["participant_id"],
+        "participant_role": participant["participant_role"],
         "speaker": _get(utterance, "speaker"),
         "raw_utterance": _get(utterance, "raw_utterance"),
         "normalized_utterance": _get(utterance, "normalized_utterance"),
@@ -375,6 +445,7 @@ def _verb_row(
         "lemma": _get(verb, "lemma"),
         "tense_mood": _get(verb, "tense_mood"),
         "category": _get(verb, "category"),
+        "category_coding_status": _get(verb, "category_coding_status"),
         "subject_form": _get(subject, "subject_form"),
         "head": _get(subject, "head"),
         "subject_type": _get(subject, "subject_type"),
@@ -390,10 +461,10 @@ def _verb_row(
         "attractor_head": _get(attraction, "attractor_head"),
         "attractor_number": _get(attraction, "attractor_number"),
         "attractor_type": _get(attraction, "attractor_type"),
-        "intervener_type": _get(attraction, "intervener_type"),
         "structural_complexity_type": _get(attraction, "structural_complexity_type"),
         "linear_distance_words": _get(attraction, "linear_distance_words"),
         "llm_confidence": _get(metadata, "llm_confidence"),
+        "low_confidence_reason": _get(metadata, "low_confidence_reason"),
         "comments": _get(metadata, "comments"),
         "agreement_status": agreement_status,
         "agreement_accuracy": 1 if agreement_status == "target" else 0 if agreement_status == "non_target" else None,
@@ -409,7 +480,6 @@ def _verb_row(
         "rq2_configuration": _rq2_configuration(
             has_attraction,
             _get(attraction, "attractor_type"),
-            _get(attraction, "intervener_type"),
             _get(attraction, "structural_complexity_type"),
         ),
         "distance_bin": _distance_bin(_get(attraction, "linear_distance_words")),
@@ -418,6 +488,7 @@ def _verb_row(
 
 
 def _rows_from_document(source_path: Path, document: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    # Build both verb-level and utterance-level rows in one pass over the document.
     verb_rows: list[dict[str, Any]] = []
     utterance_rows: list[dict[str, Any]] = []
     file_id = _label(_get(document, "file_id")) or source_path.stem
@@ -429,7 +500,9 @@ def _rows_from_document(source_path: Path, document: dict[str, Any]) -> tuple[li
         verbs = _get(utterance, "verbs", [])
         if not isinstance(verbs, list):
             verbs = []
+        participant = _participant_fields(document, utterance)
 
+        # Each verb becomes a row in verbs.csv; utterances with zero verbs are still kept below.
         local_verb_rows = [
             _verb_row(source_path, document, utterance, verb, verb_position)
             for verb_position, verb in enumerate(verbs, start=1)
@@ -444,7 +517,9 @@ def _rows_from_document(source_path: Path, document: dict[str, Any]) -> tuple[li
                 "file_id": _label(_get(utterance, "file_id")) or file_id,
                 "annotation_scope": _get(document, "annotation_scope"),
                 "utterance_id": utterance_id,
-                "learner_id": _get(utterance, "learner_id"),
+                "learner_id": participant["learner_id"],
+                "participant_id": participant["participant_id"],
+                "participant_role": participant["participant_role"],
                 "speaker": _get(utterance, "speaker"),
                 "raw_utterance": _get(utterance, "raw_utterance"),
                 "normalized_utterance": _get(utterance, "normalized_utterance"),
@@ -463,6 +538,7 @@ def _rows_from_document(source_path: Path, document: dict[str, Any]) -> tuple[li
 
 
 def _records_to_frame(records: list[dict[str, Any]], columns: list[str] | None = None) -> pd.DataFrame:
+    # Convert collected dictionaries into a stable-column Pandas table.
     frame = pd.DataFrame(records)
     if columns is not None:
         for column in columns:
@@ -481,12 +557,14 @@ def _records_to_frame(records: list[dict[str, Any]], columns: list[str] | None =
 
 
 def _rate(numerator: float, denominator: float) -> float | None:
+    # Return None instead of crashing or emitting infinity when a group has no denominator.
     if denominator == 0:
         return None
     return numerator / denominator
 
 
 def _accuracy_summary(frame: pd.DataFrame, group_columns: list[str]) -> pd.DataFrame:
+    # Shared summary helper for cue, attraction, file, and participant tables.
     if frame.empty:
         return pd.DataFrame()
     for column in group_columns:
@@ -527,19 +605,28 @@ def _accuracy_summary(frame: pd.DataFrame, group_columns: list[str]) -> pd.DataF
 
 
 def _file_summary(verbs: pd.DataFrame, utterances: pd.DataFrame) -> pd.DataFrame:
+    # File summaries start from utterances so transcript lines with zero verbs are counted.
     if utterances.empty:
         return pd.DataFrame()
+    identity_column = "participant_id" if "participant_id" in utterances else "learner_id"
     files = (
         utterances.groupby("file_id", dropna=False)
         .agg(
             source_path=("source_path", "first"),
             utterances=("utterance_uid", "size"),
-            learners=("learner_id", lambda values: " | ".join(sorted({str(value) for value in values.dropna()}))),
+            participants=(identity_column, lambda values: " | ".join(sorted({str(value) for value in values.dropna()}))),
             verb_count=("verb_count", "sum"),
             analyzable_verb_count=("analyzable_verb_count", "sum"),
         )
         .reset_index()
     )
+    if "participant_role" in utterances:
+        roles = (
+            utterances.groupby("file_id", dropna=False)["participant_role"]
+            .apply(lambda values: " | ".join(sorted({str(value) for value in values.dropna()})))
+            .reset_index(name="participant_roles")
+        )
+        files = files.merge(roles, on="file_id", how="left")
     if verbs.empty:
         files["agreement_accuracy"] = pd.NA
         files["attraction_errors"] = 0
@@ -560,17 +647,54 @@ def _file_summary(verbs: pd.DataFrame, utterances: pd.DataFrame) -> pd.DataFrame
 
 
 def _learner_summary(verbs: pd.DataFrame) -> pd.DataFrame:
+    # The output filename is legacy; the grouping now prefers final-schema participant ids.
     if verbs.empty or "learner_id" not in verbs:
         return pd.DataFrame()
+    if "participant_id" in verbs and verbs["participant_id"].notna().any():
+        group_columns = ["participant_id"]
+        if "participant_role" in verbs and verbs["participant_role"].notna().any():
+            group_columns.append("participant_role")
+        return _accuracy_summary(verbs, group_columns)
     return _accuracy_summary(verbs, ["learner_id"])
 
 
 def _research_summary(verbs: pd.DataFrame, utterances: pd.DataFrame, source_files: list[Path]) -> dict[str, Any]:
+    # Compact JSON summary for quick checks and README-style reporting.
     analyzable = int(verbs["is_analyzable_agreement"].sum()) if not verbs.empty else 0
     target_like = int(verbs["is_agreement_target_like"].sum()) if not verbs.empty else 0
     non_target = int(verbs["is_agreement_non_target"].sum()) if not verbs.empty else 0
     attraction_configs = int(verbs["has_attraction"].sum()) if not verbs.empty else 0
     attraction_errors = int(verbs["has_attraction_error"].sum()) if not verbs.empty else 0
+    participant_column = "participant_id" if "participant_id" in verbs else "learner_id"
+    participant_count = int(verbs[participant_column].nunique(dropna=True)) if not verbs.empty and participant_column in verbs else 0
+    learner_participant_count = participant_count
+    if not verbs.empty and {"participant_id", "participant_role"}.issubset(verbs.columns):
+        learner_participant_count = int(
+            verbs.loc[
+                verbs["participant_role"].astype("string").str.lower().eq("learner"),
+                "participant_id",
+            ].nunique(dropna=True)
+        )
+    low_confidence_count = 0
+    pending_category_count = 0
+    if not verbs.empty:
+        low_reason = (
+            verbs["low_confidence_reason"].astype("string").fillna("").str.strip().ne("")
+            if "low_confidence_reason" in verbs
+            else pd.Series(False, index=verbs.index)
+        )
+        low_score = (
+            pd.to_numeric(verbs["llm_confidence"], errors="coerce").lt(0.75)
+            if "llm_confidence" in verbs
+            else pd.Series(False, index=verbs.index)
+        )
+        low_confidence_count = int((low_reason | low_score).sum())
+        pending_category_count = int(
+            verbs.get("category_coding_status", pd.Series(index=verbs.index))
+            .astype("string")
+            .eq("pending_human_coding")
+            .sum()
+        )
 
     rq1 = _accuracy_summary(verbs, ["rq1_condition"]).to_dict(orient="records") if not verbs.empty else []
     rq2 = _accuracy_summary(verbs, ["rq2_configuration"]).to_dict(orient="records") if not verbs.empty else []
@@ -580,19 +704,25 @@ def _research_summary(verbs: pd.DataFrame, utterances: pd.DataFrame, source_file
         "file_count": int(verbs["file_id"].nunique(dropna=True)) if not verbs.empty else int(utterances["file_id"].nunique(dropna=True)) if not utterances.empty else 0,
         "utterance_count": int(len(utterances)),
         "verb_count": int(len(verbs)),
+        "participant_count": participant_count,
+        "learner_participant_count": learner_participant_count,
         "analyzable_verb_count": analyzable,
         "target_like_verb_count": target_like,
         "non_target_verb_count": non_target,
+        "unexpected_form_count": int(verbs["is_unexpected_form"].sum()) if not verbs.empty else 0,
         "overall_agreement_accuracy": _rate(target_like, analyzable),
         "attraction_configuration_count": attraction_configs,
         "attraction_error_count": attraction_errors,
         "attraction_error_rate": _rate(attraction_errors, attraction_configs),
+        "low_confidence_count": low_confidence_count,
+        "pending_category_coding_count": pending_category_count,
         "rq1_by_cue_condition": rq1,
         "rq2_by_configuration": rq2,
     }
 
 
 def _write_duckdb(tables: dict[str, pd.DataFrame], duckdb_path: Path) -> bool:
+    # DuckDB is optional; CSV remains the primary interchange format.
     if duckdb is None:
         return False
     with duckdb.connect(str(duckdb_path)) as conn:
@@ -605,11 +735,13 @@ def _write_duckdb(tables: dict[str, pd.DataFrame], duckdb_path: Path) -> bool:
 
 
 def _resolve_path(value: str | Path) -> Path:
+    # Resolve relative CLI paths from the repository root.
     path = Path(value).expanduser()
     return path if path.is_absolute() else ROOT / path
 
 
 def _parse_args() -> argparse.Namespace:
+    # Keep the command-line interface small: input path plus optional output directory.
     parser = argparse.ArgumentParser(
         description="Flatten L2 French agreement annotations into QueryChat-ready tables.",
     )
@@ -628,6 +760,7 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    # Entry point: discover sources, flatten records, write dashboard-ready tables.
     args = _parse_args()
     input_path = _resolve_path(args.input_path)
     output_dir = _resolve_path(args.output_dir)
@@ -639,6 +772,7 @@ def main() -> None:
 
     for source_file in source_files:
         try:
+            # Parse one source file and discover one or more annotation documents inside it.
             payload = _load_json(source_file)
             documents = list(_documents_from_payload(payload))
         except Exception as exc:
@@ -650,6 +784,7 @@ def main() -> None:
             continue
 
         for document in documents:
+            # Flatten nested utterances and verbs from this document.
             verbs, utterances = _rows_from_document(source_file, document)
             verb_records.extend(verbs)
             utterance_records.extend(utterances)
@@ -658,10 +793,11 @@ def main() -> None:
 
     verbs = _records_to_frame(verb_records, VERB_COLUMNS)
     utterances = _records_to_frame(utterance_records, UTTERANCE_COLUMNS)
+    # Summary tables are materialized so Shiny, QueryChat, and humans can inspect them directly.
     cue_summary = _accuracy_summary(verbs, ["rq1_condition", "cue_group", "cue_type", "cue_number"])
     attraction_summary = _accuracy_summary(
         verbs,
-        ["rq2_configuration", "intervener_type", "attractor_type", "structural_complexity_type"],
+        ["rq2_configuration", "attractor_type", "attractor_number", "structural_complexity_type"],
     )
     files = _file_summary(verbs, utterances)
     learners = _learner_summary(verbs)
@@ -692,6 +828,7 @@ def main() -> None:
     }
 
     for table_name, frame in tables.items():
+        # CSV is the dashboard's main storage format.
         frame.to_csv(output_dir / f"{table_name}.csv", index=False, encoding="utf-8")
 
     (output_dir / METADATA_FILENAME).write_text(
@@ -699,7 +836,7 @@ def main() -> None:
         encoding="utf-8",
     )
     (output_dir / RESEARCH_SUMMARY_FILENAME).write_text(
-        json.dumps(research_summary, ensure_ascii=False, indent=2),
+        json.dumps(_json_safe(research_summary), ensure_ascii=False, indent=2, allow_nan=False),
         encoding="utf-8",
     )
     duckdb_written = _write_duckdb(tables, output_dir / DUCKDB_FILENAME)

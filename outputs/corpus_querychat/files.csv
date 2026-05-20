@@ -1,2 +1,2 @@
-file_id,source_path,utterances,learners,verb_count,analyzable_verb_count,target_like_verbs,non_target_verbs,unexpected_forms,attraction_configurations,attraction_errors,agreement_accuracy,avg_llm_confidence
-TS_FA_session01_page01,C:\Users\MANUE\Desktop\LLM analysis\Annotation.py,38,FA | TS,50,34,34,0,0,0,0,1.0,0.941
+file_id,source_path,utterances,participants,verb_count,analyzable_verb_count,participant_roles,target_like_verbs,non_target_verbs,unexpected_forms,attraction_configurations,attraction_errors,agreement_accuracy,avg_llm_confidence
+TS_FA_session01_page01,C:\Users\MANUE\Desktop\LLM analysis\TS_FA_session01_page01_annotation.json,243,P001 | P002,312,297,learner,291,6,15,1,0,0.9797979797979798,0.8580769230769232
